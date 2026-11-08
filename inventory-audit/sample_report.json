@@ -1,0 +1,41 @@
+{
+  "total_assets": 7,
+  "issue_count": 5,
+  "issues": [
+    {
+      "index": 2,
+      "asset_name": null,
+      "field": "name",
+      "issue_type": "empty_name",
+      "message": "asset name is empty"
+    },
+    {
+      "index": 3,
+      "asset_name": "printer-01",
+      "field": "ip",
+      "issue_type": "duplicate_ip",
+      "message": "duplicate IP address 192.168.10.11: first seen at index 0 (asset 'web-server-01')"
+    },
+    {
+      "index": 4,
+      "asset_name": "camera-01",
+      "field": "ip",
+      "issue_type": "invalid_ip",
+      "message": "invalid IP address: '999.168.10.13'"
+    },
+    {
+      "index": 5,
+      "asset_name": "switch-01",
+      "field": "type",
+      "issue_type": "missing_field",
+      "message": "required field 'type' is missing"
+    },
+    {
+      "index": 6,
+      "asset_name": "backup-server",
+      "field": "ip",
+      "issue_type": "duplicate_ip",
+      "message": "duplicate IP address 2001:db8::10: first seen at index 1 (asset 'db-server-01')"
+    }
+  ]
+}

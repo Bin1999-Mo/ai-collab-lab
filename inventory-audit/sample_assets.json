@@ -1,0 +1,36 @@
+[
+    {
+        "ip": "192.168.10.11",
+        "name": "web-server-01",
+        "type": "server"
+    },
+    {
+        "ip": "2001:db8::10",
+        "name": "db-server-01",
+        "type": "server"
+    },
+    {
+        "ip": "192.168.10.12",
+        "name": "",
+        "type": "workstation"
+    },
+    {
+        "ip": "192.168.10.11",
+        "name": "printer-01",
+        "type": "printer"
+    },
+    {
+        "ip": "999.168.10.13",
+        "name": "camera-01",
+        "type": "camera"
+    },
+    {
+        "ip": "192.168.10.20",
+        "name": "switch-01"
+    },
+    {
+        "ip": "2001:db8::10",
+        "name": "backup-server",
+        "type": "server"
+    }
+]
