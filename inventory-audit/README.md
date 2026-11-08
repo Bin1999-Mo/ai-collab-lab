@@ -26,7 +26,8 @@ The tool reports:
 | `duplicate_ip`  | Same IP used by more than one asset (compared after normalisation, so different spellings of one IPv6 address also count) |
 | `missing_field` | A required field (`name` / `ip` / `type`) is absent, null, or (for `type`) empty |
 | `invalid_record`| A list entry is not a JSON object                              |
-| `invalid_json`  | The input file is not valid JSON, or its top level is not a list |
+| `invalid_json`  | The input file is not valid JSON, not valid UTF-8, or its top level is not a list |
+| `invalid_field_type` | The `type` field is present but is not a string (e.g. a number, boolean or list) |
 
 ## Usage
 
@@ -41,7 +42,14 @@ python3 inventory_audit.py sample_assets.json -o sample_report.json
 ```
 
 Exit codes: `0` = no issues found, `1` = at least one issue found
-(including invalid JSON input), `2` = input file could not be read.
+(including invalid JSON / non-UTF-8 input), `2` = a file error: the
+input could not be read, the report could not be written (e.g. the
+output directory does not exist — this prints a clear error, not a
+traceback), or the output path is the same file as the input.
+
+Safety: the tool refuses to write the report over its own input file
+(`-o` pointing at the input, including through a symbolic link, is
+rejected with exit code 2 and the input is left unchanged).
 
 ## Report format
 

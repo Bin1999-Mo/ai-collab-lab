@@ -19,9 +19,13 @@ Usage:
 Exit codes:
     0  the inventory was read and no issues were found
     1  the inventory was read and at least one issue was found
-       (an invalid-JSON input is reported as a single ``invalid_json``
-       issue and also exits with 1)
-    2  the input file could not be read at all (e.g. it does not exist)
+       (an invalid-JSON or non-UTF-8 input is reported as a single
+       ``invalid_json`` issue and also exits with 1)
+    2  a file error: the input file could not be read at all (e.g. it
+       does not exist), the report could not be written (e.g. the
+       output directory does not exist), or the output path is the
+       same file as the input path (overwriting the input is refused,
+       including through a symbolic link)
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import sys
 
 REQUIRED_FIELDS = ("name", "ip", "type")
@@ -100,6 +105,17 @@ def validate_assets(assets):
                        "required field 'type' is empty")
             )
 
+        # A present, non-null type must be a string (numbers, booleans,
+        # lists etc. are rejected with their own issue type).
+        if "type" in record and record["type"] is not None \
+                and not isinstance(record["type"], str):
+            issues.append(
+                _issue(index, asset_name, "type", "invalid_field_type",
+                       f"field 'type' must be a non-empty string, "
+                       f"got {type(record['type']).__name__}: "
+                       f"{record['type']!r}")
+            )
+
         # IP format and duplicates (only when an ip value is present).
         if "ip" in record and record["ip"] is not None:
             normalised = _normalised_ip(record["ip"])
@@ -134,11 +150,14 @@ def build_report(assets):
 def load_assets(path):
     """Load and parse the inventory file.
 
-    Raises InventoryLoadError if the file content is not valid JSON or
-    the top-level JSON value is not a list.
+    Raises InventoryLoadError if the file content is not valid UTF-8,
+    not valid JSON, or the top-level JSON value is not a list.
     """
-    with open(path, "r", encoding="utf-8") as handle:
-        text = handle.read()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except UnicodeDecodeError as exc:
+        raise InventoryLoadError(f"invalid UTF-8 input: {exc}") from exc
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -167,6 +186,22 @@ def audit_file(path):
     return build_report(assets)
 
 
+def _is_same_file(path_a, path_b):
+    """True if two paths refer to the same file.
+
+    Symbolic links are resolved, and when both paths exist the
+    filesystem identity (device + inode) is compared as well, so a
+    symlink or hard link to the input is recognised.
+    """
+    if os.path.realpath(path_a) == os.path.realpath(path_b):
+        return True
+    try:
+        return os.path.exists(path_a) and os.path.exists(path_b) \
+            and os.path.samefile(path_a, path_b)
+    except OSError:
+        return False
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Audit a JSON asset inventory for naming, IP and "
@@ -180,6 +215,14 @@ def main(argv=None):
                         help="JSON indentation level (default: 2)")
     args = parser.parse_args(argv)
 
+    # Refuse to overwrite the input file, including via a symlink or
+    # another path that resolves to the same file.
+    if args.output and _is_same_file(args.input, args.output):
+        print(f"error: output path {args.output!r} is the same file as "
+              f"the input; refusing to overwrite the input inventory",
+              file=sys.stderr)
+        return 2
+
     try:
         report = audit_file(args.input)
     except OSError as exc:
@@ -188,8 +231,13 @@ def main(argv=None):
 
     text = json.dumps(report, ensure_ascii=False, indent=args.indent)
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as handle:
-            handle.write(text + "\n")
+        try:
+            with open(args.output, "w", encoding="utf-8") as handle:
+                handle.write(text + "\n")
+        except OSError as exc:
+            print(f"error: cannot write report to {args.output!r}: {exc}",
+                  file=sys.stderr)
+            return 2
     else:
         print(text)
     return 0 if report["issue_count"] == 0 else 1

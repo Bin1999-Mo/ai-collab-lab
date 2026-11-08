@@ -138,5 +138,97 @@ class FileInputTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
 
 
+class ReviewRegressionTests(unittest.TestCase):
+    """Regression tests for the four defects found in ChatGPT's
+    independent review of the first TASK-001 delivery (commit 9b4a2037).
+    """
+
+    def _write_temp(self, text):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return path
+
+    # P1: -o must never overwrite the input file.
+    def test_output_same_as_input_is_refused_and_input_unchanged(self):
+        content = json.dumps(
+            [{"name": "a", "ip": "10.0.0.1", "type": "server"}])
+        input_path = self._write_temp(content)
+        exit_code = inventory_audit.main([input_path, "-o", input_path])
+        self.assertEqual(exit_code, 2)
+        with open(input_path, "r", encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), content)
+
+    # P1 (symlink case): an output path that is a symlink to the input
+    # must be refused as well.
+    def test_output_symlink_to_input_is_refused(self):
+        content = json.dumps(
+            [{"name": "a", "ip": "10.0.0.1", "type": "server"}])
+        input_path = self._write_temp(content)
+        link_path = input_path + ".link.json"
+        try:
+            os.symlink(input_path, link_path)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not available on this platform")
+        self.addCleanup(
+            lambda: os.path.islink(link_path) and os.remove(link_path))
+        exit_code = inventory_audit.main([input_path, "-o", link_path])
+        self.assertEqual(exit_code, 2)
+        with open(input_path, "r", encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), content)
+
+    # P2: writing to a non-existent output directory must produce a
+    # controlled exit code 2, not an exception traceback.
+    def test_output_to_missing_directory_returns_2(self):
+        input_path = self._write_temp(json.dumps(
+            [{"name": "a", "ip": "10.0.0.1", "type": "server"}]))
+        bad_output = os.path.join(
+            tempfile.gettempdir(), "no-such-dir-task001-xyz", "report.json")
+        exit_code = inventory_audit.main([input_path, "-o", bad_output])
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(os.path.exists(bad_output))
+
+    # P2 (encoding): invalid UTF-8 bytes must be handled like other
+    # controlled input errors: a single invalid_json report issue and
+    # CLI exit code 1, with no UnicodeDecodeError escaping.
+    def test_invalid_utf8_input_is_controlled(self):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(b'[{"name": "\xff\xfe", "ip": "10.0.0.1"}]')
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        report = inventory_audit.audit_file(path)
+        self.assertEqual(report["issue_count"], 1)
+        self.assertEqual(types_of(report), ["invalid_json"])
+        self.assertIn("UTF-8", report["issues"][0]["message"])
+        self.assertEqual(inventory_audit.main([path]), 1)
+
+    # P3: a non-string type (number, boolean, list) must be rejected
+    # with the dedicated invalid_field_type issue type.
+    def test_non_string_type_detected(self):
+        assets = [
+            {"name": "a", "ip": "10.0.0.1", "type": 123},
+            {"name": "b", "ip": "10.0.0.2", "type": True},
+            {"name": "c", "ip": "10.0.0.3", "type": ["server"]},
+        ]
+        report = inventory_audit.build_report(assets)
+        self.assertEqual(report["issue_count"], 3)
+        self.assertEqual(types_of(report), ["invalid_field_type"] * 3)
+        self.assertTrue(
+            all(i["field"] == "type" for i in report["issues"]))
+
+    # P3 (control): ordinary string types keep working, and an empty
+    # string type is still reported as a missing field.
+    def test_string_and_empty_type_behaviour_unchanged(self):
+        assets = [
+            {"name": "a", "ip": "10.0.0.1", "type": "server"},
+            {"name": "b", "ip": "10.0.0.2", "type": ""},
+        ]
+        report = inventory_audit.build_report(assets)
+        self.assertEqual(report["issue_count"], 1)
+        self.assertEqual(types_of(report), ["missing_field"])
+        self.assertEqual(report["issues"][0]["index"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
